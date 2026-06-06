@@ -4,7 +4,7 @@ A [Xendit](https://www.xendit.co/) payment provider for **Medusa v2**, built on 
 **Invoice API** (hosted checkout). Customer is redirected to a Xendit-hosted invoice page; a
 webhook backstop creates the order server-side even if the customer never returns to your store.
 
-Verified against Medusa **2.15.3** in Xendit **test mode**. IDR-first (see
+Verified against Medusa **2.15.3** in Xendit **test mode** with IDR (see
 [Amounts & currency](#amounts--currency)).
 
 > Not affiliated with or endorsed by Xendit. "Xendit" is a trademark of its owner; this is a
@@ -142,11 +142,14 @@ Medusa's payment workflow guards against double cart completion.
 
 ## Amounts & currency
 
-**IDR-first.** Xendit's smallest-unit rules differ per currency, and this provider currently treats
-**all** currencies as zero-decimal integer major units (correct for IDR: `Rp 10.000` → `10000`,
-no ×100). For **PHP and other Xendit currencies this is not yet correct** — see the `TODO (P2)` in
-`src/service.ts`. Use IDR until per-currency conversion lands, or verify the unit handling for your
-currency first.
+Amounts are converted **per currency** using each currency's decimal precision (from Medusa's
+`defaultCurrencies`). Zero-decimal currencies — IDR, JPY, VND — are sent as whole major units
+(`Rp 10.000` → `10000`, no ×100); two-decimal currencies — USD, PHP, etc. — keep their cents
+(`$10.50` → `10.5`). Unknown currency codes fall back to two decimals.
+
+Note that Xendit invoice amounts are major-unit values (not the smallest unit), so this provider
+sends e.g. `10.5` for USD rather than `1050`. Only IDR has been verified end-to-end; if you use
+another currency, confirm the unit handling against a Xendit test-mode invoice first.
 
 ## Refunds
 
@@ -158,6 +161,11 @@ manually via the Xendit dashboard.
 
 - Medusa `2.15.3` (Xendit test mode, end to end: redirect happy path + webhook backstop).
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, scripts, and
+conventions. Release notes live in [CHANGELOG.md](./CHANGELOG.md).
+
 ## License
 
-MIT.
+MIT — see [LICENSE](./LICENSE).

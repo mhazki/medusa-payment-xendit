@@ -3,7 +3,15 @@
   "version": "0.1.0",
   "description": "Xendit payment provider for Medusa v2 (Invoice API)",
   "license": "MIT",
-  "author": "",
+  "author": "mhazki <hazki.hariowibowo@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhazki/medusa-payment-xendit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mhazki/medusa-payment-xendit/issues"
+  },
+  "homepage": "https://github.com/mhazki/medusa-payment-xendit#readme",
   "keywords": [
     "medusa",
     "medusa-plugin",
