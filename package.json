@@ -1,0 +1,40 @@
+{
+  "name": "medusa-payment-xendit",
+  "version": "0.1.0",
+  "description": "Xendit payment provider for Medusa v2 (Invoice API)",
+  "license": "MIT",
+  "author": "",
+  "keywords": [
+    "medusa",
+    "medusa-plugin",
+    "medusa-payment",
+    "xendit",
+    "indonesia",
+    "sea"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest"
+  },
+  "peerDependencies": {
+    "@medusajs/framework": "^2.0.0",
+    "@medusajs/types": "^2.0.0",
+    "@medusajs/utils": "^2.0.0"
+  },
+  "devDependencies": {
+    "@medusajs/framework": "^2.15.3",
+    "@medusajs/types": "^2.15.3",
+    "@medusajs/utils": "^2.15.3",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

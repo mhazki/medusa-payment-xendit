@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+
+# Local-only maintainer working notes — not for publication.
+STATUS.md
