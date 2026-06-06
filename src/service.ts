@@ -1,6 +1,7 @@
 import {
   AbstractPaymentProvider,
   BigNumber,
+  defaultCurrencies,
   MedusaError,
   PaymentActions,
   PaymentSessionStatus,
@@ -8,6 +9,7 @@ import {
 import {
   AuthorizePaymentInput,
   AuthorizePaymentOutput,
+  BigNumberInput,
   CancelPaymentInput,
   CancelPaymentOutput,
   CapturePaymentInput,
@@ -87,7 +89,8 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    extraHeaders?: Record<string, string>
   ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
@@ -95,6 +98,7 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
         Authorization: this.authHeader(),
         Accept: "application/json",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...extraHeaders,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
@@ -109,8 +113,18 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
     return (await res.json()) as T
   }
 
-  private createInvoice(body: Record<string, unknown>): Promise<XenditInvoice> {
-    return this.request<XenditInvoice>("POST", "/v2/invoices", body)
+  // `idempotencyKey` lets Xendit dedupe retried creates: a repeated call with
+  // the same key returns the original invoice instead of charging twice.
+  private createInvoice(
+    body: Record<string, unknown>,
+    idempotencyKey?: string
+  ): Promise<XenditInvoice> {
+    return this.request<XenditInvoice>(
+      "POST",
+      "/v2/invoices",
+      body,
+      idempotencyKey ? { "X-IDEMPOTENCY-KEY": idempotencyKey } : undefined
+    )
   }
 
   private getInvoice(id: string): Promise<XenditInvoice> {
@@ -139,6 +153,25 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
     }
   }
 
+  // ── amount conversion ──────────────────────────────────────────────────────
+
+  // Medusa hands amounts as decimal major units (e.g. 10.5 USD, 10000 IDR).
+  // Xendit's invoice `amount` is also a major-unit number, but must respect the
+  // currency's precision: zero-decimal currencies (IDR, JPY, VND) take whole
+  // numbers; two-decimal currencies (USD, PHP) keep cents. We round to that
+  // precision rather than blindly to an integer (which would drop cents).
+  // Unknown currencies fall back to 2 decimals, the global default.
+  private toXenditAmount(
+    amount: BigNumberInput,
+    currencyCode: string
+  ): number {
+    const digits =
+      defaultCurrencies[currencyCode.toUpperCase() as keyof typeof defaultCurrencies]
+        ?.decimal_digits ?? 2
+    const factor = 10 ** digits
+    return Math.round(Number(amount) * factor) / factor
+  }
+
   // ── provider interface ─────────────────────────────────────────────────────
 
   async initiatePayment(
@@ -146,26 +179,26 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
   ): Promise<InitiatePaymentOutput> {
     const { amount, currency_code, data, context } = input
 
-    // TODO (P2): add currency-aware amount conversion. Xendit's smallest-unit
-    // rules differ per currency (IDR is zero-decimal; PHP uses centavos).
-    // Currently treats all currencies as zero-decimal (integer major units).
-    const xenditAmount = Math.round(Number(amount))
+    const xenditAmount = this.toXenditAmount(amount, currency_code)
 
     // Medusa passes the payment session id in `data.session_id`. We use it as
     // the invoice's external_id so the webhook can map back to the session.
     const sessionId = (data?.session_id as string | undefined) ?? ""
 
-    const invoice = await this.createInvoice({
-      external_id: sessionId,
-      amount: xenditAmount,
-      currency: currency_code.toUpperCase(),
-      payer_email: context?.customer?.email,
-      description: (data?.description as string | undefined) ?? undefined,
-      invoice_duration:
-        this.options_.invoiceDuration ?? DEFAULT_INVOICE_DURATION,
-      success_redirect_url: data?.success_redirect_url as string | undefined,
-      failure_redirect_url: data?.failure_redirect_url as string | undefined,
-    })
+    const invoice = await this.createInvoice(
+      {
+        external_id: sessionId,
+        amount: xenditAmount,
+        currency: currency_code.toUpperCase(),
+        payer_email: context?.customer?.email,
+        description: (data?.description as string | undefined) ?? undefined,
+        invoice_duration:
+          this.options_.invoiceDuration ?? DEFAULT_INVOICE_DURATION,
+        success_redirect_url: data?.success_redirect_url as string | undefined,
+        failure_redirect_url: data?.failure_redirect_url as string | undefined,
+      },
+      context?.idempotency_key
+    )
 
     const sessionData: XenditSessionData = {
       invoice_id: invoice.id,
@@ -243,7 +276,7 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
     input: UpdatePaymentInput
   ): Promise<UpdatePaymentOutput> {
     const data = input.data as XenditSessionData | undefined
-    const newAmount = Math.round(Number(input.amount))
+    const newAmount = this.toXenditAmount(input.amount, input.currency_code)
 
     if (data?.invoice_id && data.amount === newAmount) {
       return { status: this.toSessionStatus(data.status), data: input.data }
@@ -259,7 +292,22 @@ class XenditProviderService extends AbstractPaymentProvider<XenditOptions> {
       )
     }
 
-    const initiated = await this.initiatePayment(input as InitiatePaymentInput)
+    // Re-creating with the original idempotency key would make Xendit return the
+    // now-expired invoice (wrong amount). Suffix the key with the new amount so
+    // the fresh invoice is created, while a retry of *this* update stays idempotent.
+    const recreateInput = {
+      ...input,
+      context: {
+        ...input.context,
+        idempotency_key: input.context?.idempotency_key
+          ? `${input.context.idempotency_key}:${newAmount}`
+          : undefined,
+      },
+    }
+
+    const initiated = await this.initiatePayment(
+      recreateInput as InitiatePaymentInput
+    )
     return { status: initiated.status, data: initiated.data }
   }
 
